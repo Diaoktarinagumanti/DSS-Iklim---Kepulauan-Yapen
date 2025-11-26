@@ -10,7 +10,10 @@ from datetime import datetime, timedelta
 # ---------- CONFIG ----------
 st.set_page_config(page_title="DSS Iklim - Kepulauan Yapen", layout="wide")
 st.title("🌦️ Decision Support System Iklim — Kepulauan Yapen")
-st.markdown("Dashboard prediksi & analisis iklim. Data akan otomatis dimuat dari file lokal `data_yapen.csv` jika tersedia, jika tidak aplikasi membuat data contoh.")
+st.markdown(
+    "Dashboard prediksi & analisis iklim. Data akan otomatis dimuat dari file lokal `data_yapen.csv` "
+    "jika tersedia; jika tidak aplikasi membuat data contoh."
+)
 
 LOCAL_CSV_PATH = "data_yapen.csv"  # ubah path bila perlu
 
@@ -25,12 +28,14 @@ def klasifikasi_cuaca(ch, matahari):
     else:
         return "Berawan"
 
+
 def risiko_kekeringan_score(ch, matahari):
     # score 0..1, higher = higher drought risk
     ch_clamped = np.clip(ch, 0, 200)
     matahari_clamped = np.clip(matahari, 0, 16)
     score = (1 - (ch_clamped / 200)) * 0.7 + (matahari_clamped / 16) * 0.3
     return float(np.clip(score, 0, 1))
+
 
 def risiko_kekeringan_label(score, thresholds=(0.6, 0.3)):
     high, med = thresholds
@@ -41,24 +46,32 @@ def risiko_kekeringan_label(score, thresholds=(0.6, 0.3)):
     else:
         return "Risiko Rendah"
 
+
 def hujan_ekstrem_flag(ch, threshold=50):
     return int(ch > threshold)
 
+
 def compute_weather_index(df):
+    # Composite index 0..1 from rainfall, temp stress, humidity stress, wind
     eps = 1e-6
     r = df['curah_hujan'].fillna(0).astype(float).values
     r_norm = (r - r.min()) / (r.max() - r.min() + eps)
-    t = df['Tavg'].fillna(df['Tn']).astype(float).values
+
+    t = df['Tavg'].fillna(df.get('Tn', df['Tavg'])).astype(float).values
     comfy_low, comfy_high = 24, 28
     t_dist = np.maximum(0, np.maximum(comfy_low - t, t - comfy_high))
     t_norm = (t_dist - t_dist.min()) / (t_dist.max() - t_dist.min() + eps)
+
     h = df['kelembaban'].fillna(0).astype(float).values
     hum_dist = np.maximum(0, np.maximum(40 - h, h - 70))
     h_norm = (hum_dist - hum_dist.min()) / (hum_dist.max() - hum_dist.min() + eps)
+
     w = df['kecepatan_angin'].fillna(0).astype(float).values
     w_norm = (w - w.min()) / (w.max() - w.min() + eps)
+
     composite = 0.35 * r_norm + 0.25 * t_norm + 0.2 * h_norm + 0.2 * w_norm
     return np.clip(composite, 0, 1)
+
 
 # ---------- Data loading ----------
 @st.cache_data(show_spinner=False)
@@ -82,15 +95,16 @@ def load_data(local_path=LOCAL_CSV_PATH):
             'kelembaban': np.random.randint(50, 95, len(rng)),
             'matahari': np.clip(np.random.normal(5, 2, len(rng)), 0, 12).round(1),
             'kecepatan_angin': np.random.uniform(0, 20, len(rng)).round(1),
-            'Wilayah': np.random.choice(['Aromut','Anggrup','Pungua','Serui'], len(rng))
+            'Wilayah': np.random.choice(['Aromut', 'Anggrup', 'Pungua', 'Serui'], len(rng))
         })
     # Ensure types & fill NAs
     df['Tanggal'] = pd.to_datetime(df['Tanggal'], errors='coerce')
-    for col in ['curah_hujan','Tn','Tx','Tavg','kelembaban','matahari','kecepatan_angin']:
+    for col in ['curah_hujan', 'Tn', 'Tx', 'Tavg', 'kelembaban', 'matahari', 'kecepatan_angin']:
         if col not in df.columns:
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return df.sort_values('Tanggal').reset_index(drop=True)
+
 
 # Load
 data = load_data()
@@ -107,6 +121,7 @@ st.sidebar.header("📅 Filter data")
 min_date = data['Tanggal'].min().date()
 max_date = data['Tanggal'].max().date()
 date_range = st.sidebar.date_input("Rentang tanggal", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+
 region = None
 if 'Wilayah' in data.columns:
     regions = ['All'] + sorted(data['Wilayah'].unique().tolist())
@@ -143,7 +158,7 @@ c4.metric("Avg RiskScore", f"{df['RiskScore'].mean():.2f}")
 # ---------------- 1. Rainfall Forecast ----------------
 st.markdown("---")
 st.header("1. Prediksi Curah Hujan (Rainfall Forecast)")
-r1, r2 = st.columns([2,1])
+r1, r2 = st.columns([2, 1])
 with r1:
     fig_rain_line = px.line(df, x='Tanggal', y='curah_hujan', title="Rainfall (Line Chart)")
     fig_rain_line.update_layout(yaxis_title="mm", xaxis_title="Tanggal")
@@ -162,9 +177,10 @@ with r2:
 # ---------------- 2. Temperature Forecast ----------------
 st.markdown("---")
 st.header("2. Prediksi Hari Panas / Temperatur (Temperature Forecast)")
-t1, t2 = st.columns([2,1])
+t1, t2 = st.columns([2, 1])
 with t1:
-    fig_temp = px.line(df, x='Tanggal', y=['Tn','Tavg','Tx'], labels={'value':'Temperature (°C)'}, title="Temperature Trends (Tn, Tavg, Tx)")
+    fig_temp = px.line(df, x='Tanggal', y=['Tn', 'Tavg', 'Tx'], labels={'value': 'Temperature (°C)'},
+                       title="Temperature Trends (Tn, Tavg, Tx)")
     st.plotly_chart(fig_temp, use_container_width=True)
 
     # Heatmap month x day of average Tavg (if range long enough)
@@ -173,7 +189,8 @@ with t1:
     heat_df['MonthName'] = heat_df['Tanggal'].dt.strftime('%b')
     pivot = heat_df.pivot_table(index='MonthName', columns='Day', values='Tavg', aggfunc='mean')
     if pivot.shape[0] > 0 and pivot.shape[1] > 0:
-        fig_heat = px.imshow(pivot, labels=dict(x='Day', y='Month', color='Tavg'), title="Temperature Heatmap (Month x Day)")
+        fig_heat = px.imshow(pivot, labels=dict(x='Day', y='Month', color='Tavg'),
+                             title="Temperature Heatmap (Month x Day)")
         st.plotly_chart(fig_heat, use_container_width=True)
 
 with t2:
@@ -183,23 +200,23 @@ with t2:
 # ---------------- 3. Prediksi Risiko Kekeringan ----------------
 st.markdown("---")
 st.header("3. Prediksi Risiko Kekeringan")
-d1, d2 = st.columns([2,1])
+d1, d2 = st.columns([2, 1])
 with d1:
     latest_score = df['RiskScore'].mean()
     gauge = go.Figure(go.Indicator(
         mode="gauge+number",
         value=latest_score,
-        number={'valueformat':".2f"},
+        number={'valueformat': ".2f"},
         gauge={
-            'axis': {'range':[0,1]},
+            'axis': {'range': [0, 1]},
             'bar': {'color': "darkblue"},
             'steps': [
-                {'range':[0, risk_med], 'color':"lightgreen"},
-                {'range':[risk_med, risk_high], 'color':"yellow"},
-                {'range':[risk_high,1], 'color':"red"}
+                {'range': [0, risk_med], 'color': "lightgreen"},
+                {'range': [risk_med, risk_high], 'color': "yellow"},
+                {'range': [risk_high, 1], 'color': "red"}
             ]
         },
-        title={'text':"Average Drought Risk (0-1)"}
+        title={'text': "Average Drought Risk (0-1)"}
     ))
     gauge.update_layout(height=300)
     st.plotly_chart(gauge, use_container_width=True)
@@ -209,9 +226,8 @@ with d1:
         fig_bar_region = px.bar(by_region, x='Wilayah', y='RiskScore', title="Average RiskScore per Wilayah")
         st.plotly_chart(fig_bar_region, use_container_width=True)
 
-    fig_risk_line = px.line(df, x='Tanggal', y='RiskScore', title="Risk Score Over Time")
-    # add moving average
     df['Risk_MA'] = df['RiskScore'].rolling(window=ma_window).mean()
+    fig_risk_line = px.line(df, x='Tanggal', y='RiskScore', title="Risk Score Over Time")
     fig_risk_line.add_scatter(x=df['Tanggal'], y=df['Risk_MA'], mode='lines', name=f'MA({ma_window})')
     st.plotly_chart(fig_risk_line, use_container_width=True)
 
@@ -222,7 +238,7 @@ with d2:
 # ---------------- 4. Prediksi Hujan Ekstrem ----------------
 st.markdown("---")
 st.header("4. Prediksi Hujan Ekstrem")
-e1, e2 = st.columns([2,1])
+e1, e2 = st.columns([2, 1])
 with e1:
     freq = df[df['Hujan Ekstrem'] == 'Ya'].groupby(df['Tanggal'].dt.to_period('M')).size().reset_index(name='count')
     if not freq.empty:
@@ -232,10 +248,10 @@ with e1:
     else:
         st.info("Tidak ada kejadian hujan ekstrem pada rentang ini.")
 
-    fig_scatter = px.scatter(df, x='Tanggal', y='curah_hujan', color='Hujan Ekstrem', title="Curah Hujan vs Waktu (Scatter)")
+    fig_scatter = px.scatter(df, x='Tanggal', y='curah_hujan', color='Hujan Ekstrem',
+                             title="Curah Hujan vs Waktu (Scatter)")
     st.plotly_chart(fig_scatter, use_container_width=True)
 
-    # rolling probability
     df['extreme_prob_30d'] = df['extreme_flag'].rolling(window=30, min_periods=1).mean()
     fig_prob = px.line(df, x='Tanggal', y='extreme_prob_30d', title="Rolling 30-day Probability of Extreme Rain")
     st.plotly_chart(fig_prob, use_container_width=True)
@@ -247,24 +263,23 @@ with e2:
 # ---------------- 5. Weather Index (composite) ----------------
 st.markdown("---")
 st.header("5. Prediksi Indeks Cuaca Gabungan (Weather Index Prediction)")
-w1, w2 = st.columns([2,1])
+w1, w2 = st.columns([2, 1])
 with w1:
-    # Radar of components
     comp = pd.DataFrame({
         'rain': (df['curah_hujan'] - df['curah_hujan'].min()) / (df['curah_hujan'].max() - df['curah_hujan'].min() + 1e-6),
         'temp_stress': (np.maximum(0, np.maximum(24 - df['Tavg'], df['Tavg'] - 28))),
         'hum_stress': (np.maximum(0, np.maximum(40 - df['kelembaban'], df['kelembaban'] - 70))),
         'wind': (df['kecepatan_angin'] - df['kecepatan_angin'].min()) / (df['kecepatan_angin'].max() - df['kecepatan_angin'].min() + 1e-6)
     })
-    # normalize temp_stress & hum_stress to 0..1
-    for col in ['temp_stress','hum_stress']:
+    for col in ['temp_stress', 'hum_stress']:
         comp[col] = (comp[col] - comp[col].min()) / (comp[col].max() - comp[col].min() + 1e-6)
     avg_comp = comp.mean()
-    cats = ['Rain','TempStress','HumStress','Wind']
+    cats = ['Rain', 'TempStress', 'HumStress', 'Wind']
     vals = avg_comp.values.tolist()
     vals += vals[:1]
     fig_radar = go.Figure(data=go.Scatterpolar(r=vals, theta=cats + [cats[0]], fill='toself', name='AvgComponents'))
-    fig_radar.update_layout(polar=dict(radialaxis=dict(range=[0,1])), showlegend=False, title="Weather Index Components (Radar)")
+    fig_radar.update_layout(polar=dict(radialaxis=dict(range=[0, 1])), showlegend=False,
+                            title="Weather Index Components (Radar)")
     st.plotly_chart(fig_radar, use_container_width=True)
 
     fig_index = px.line(df, x='Tanggal', y='WeatherIndex', title="Composite Weather Index Over Time")
@@ -279,24 +294,25 @@ st.markdown("---")
 st.header("6. Tren Kualitas Iklim Bulanan/Tahunan")
 m1, m2 = st.columns(2)
 with m1:
-    # Multi-line monthly averages by year
     years = sorted(df['Year'].unique())
     fig_multi = go.Figure()
     for y in years:
-        dtemp = df[df['Year'] == y].groupby(df['Tanggal'].dt.month)['curah_hujan'].mean().reset_index()
-        fig_multi.add_trace(go.Scatter(x=dtemp['Tanggal'], y=dtemp['curah_hujan'], mode='lines+markers', name=str(y)))
+        tmp = df[df['Year'] == y].copy()
+        monthly = tmp.groupby(tmp['Tanggal'].dt.month)['curah_hujan'].mean().reset_index(name='curah_hujan')
+        # month numbers as x
+        fig_multi.add_trace(go.Scatter(x=monthly['Tanggal'], y=monthly['curah_hujan'], mode='lines+markers', name=str(y)))
     fig_multi.update_layout(title="Monthly Average Rainfall by Year", xaxis_title="Month", yaxis_title="Rain (mm)")
     st.plotly_chart(fig_multi, use_container_width=True)
 
 with m2:
     df['Rain_MA'] = df['curah_hujan'].rolling(window=ma_window).mean()
-    fig_ma = px.line(df, x='Tanggal', y=['curah_hujan','Rain_MA'], title=f"Moving Average Rainfall (window={ma_window})")
+    fig_ma = px.line(df, x='Tanggal', y=['curah_hujan', 'Rain_MA'], title=f"Moving Average Rainfall (window={ma_window})")
     st.plotly_chart(fig_ma, use_container_width=True)
 
 # ---------------- 7. Prediksi Anomali Iklim ----------------
 st.markdown("---")
 st.header("7. Prediksi Anomali Iklim")
-a1, a2 = st.columns([2,1])
+a1, a2 = st.columns([2, 1])
 with a1:
     baseline_temp = data.groupby(data['Tanggal'].dt.month)['Tavg'].mean()
     df['baseline_Tavg'] = df['Tanggal'].dt.month.map(baseline_temp)
@@ -304,7 +320,8 @@ with a1:
 
     anom_pivot = df.pivot_table(index=df['Tanggal'].dt.year, columns=df['Tanggal'].dt.month, values='Tavg_anom', aggfunc='mean')
     if anom_pivot.shape[0] > 0 and anom_pivot.shape[1] > 0:
-        fig_anom = px.imshow(anom_pivot, labels=dict(x='Month', y='Year', color='Tavg anomaly'), title="Temperature Anomaly (Year x Month)")
+        fig_anom = px.imshow(anom_pivot, labels=dict(x='Month', y='Year', color='Tavg anomaly'),
+                             title="Temperature Anomaly (Year x Month)")
         st.plotly_chart(fig_anom, use_container_width=True)
 
     fig_anom_line = go.Figure()
@@ -321,10 +338,25 @@ with a2:
 st.markdown("---")
 with st.expander("📁 Lihat dan Unduh Data Lengkap"):
     st.dataframe(df)
+
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
         df.to_excel(writer, sheet_name='Hasil_DSS', index=False)
-        writer.save()
-    st.download_button("Unduh Excel Hasil Analisis", data=buffer.getvalue(), file_name="hasil_dss_iklim.xlsx", mime="application/vnd.ms-excel")
+        # no writer.save() — context manager will close and flush
 
-st.caption("Catatan: Pastikan kolom minimal: Tanggal, curah_hujan, Tn, Tx, Tavg, kelembaban, matahari, kecepatan_angin. Untuk data nyata, masukkan file CSV bernama `data_yapen.csv` di folder yang sama.")
+    # move buffer pointer to start
+    buffer.seek(0)
+
+    st.download_button(
+        "Unduh Excel Hasil Analisis",
+        data=buffer.getvalue(),
+        file_name="hasil_dss_iklim.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+st.caption(
+    "Catatan: Pastikan kolom minimal: Tanggal, curah_hujan, Tn, Tx, Tavg, kelembaban, matahari, kecepatan_angin. "
+    "Untuk data nyata, masukkan file CSV bernama `data_yapen.csv` di folder yang sama."
+)
+
+
